@@ -1,6 +1,5 @@
 services:
   arris-exporter:
-    build: .
     image: ghcr.io/slother/arris-exporter:latest
     container_name: arris-exporter
     network_mode: host
