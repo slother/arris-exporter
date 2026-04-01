@@ -381,16 +381,19 @@ def scrape(base_url: str) -> None:
                 continue
             text = [c.get_text(strip=True) for c in cells]
             if text[0].startswith("Downstream"):
-                channel = text[0]
-                dcid = text[1]
-                freq_mhz = str(parse_float(text[2]))
-                freq_hz = parse_float(text[2]) * 1e6
-                power = parse_float(text[3])
-                snr = parse_float(text[4])
-                modulation = text[5]
-                octets = parse_int(text[6])
-                correcteds = parse_int(text[7])
-                uncorrectables = parse_int(text[8])
+                try:
+                    channel = text[0]
+                    dcid = text[1]
+                    freq_mhz = str(parse_float(text[2]))
+                    freq_hz = parse_float(text[2]) * 1e6
+                    power = parse_float(text[3])
+                    snr = parse_float(text[4])
+                    modulation = text[5]
+                    octets = parse_int(text[6])
+                    correcteds = parse_int(text[7])
+                    uncorrectables = parse_int(text[8])
+                except ValueError:
+                    continue
 
                 labels = [channel, dcid, freq_mhz, modulation]
                 ds_power.labels(*labels).set(power)
@@ -409,14 +412,17 @@ def scrape(base_url: str) -> None:
                 continue
             text = [c.get_text(strip=True) for c in cells]
             if text[0].startswith("Upstream"):
-                channel = text[0]
-                ucid = text[1]
-                freq_mhz = str(parse_float(text[2]))
-                freq_hz = parse_float(text[2]) * 1e6
-                power = parse_float(text[3])
-                channel_type = text[4]
-                sym_rate = parse_float(text[5])
-                modulation = text[6]
+                try:
+                    channel = text[0]
+                    ucid = text[1]
+                    freq_mhz = str(parse_float(text[2]))
+                    freq_hz = parse_float(text[2]) * 1e6
+                    power = parse_float(text[3])
+                    channel_type = text[4]
+                    sym_rate = parse_float(text[5])
+                    modulation = text[6]
+                except ValueError:
+                    continue
 
                 us_power.labels(channel, ucid, freq_mhz, modulation, channel_type).set(power)
                 us_frequency.labels(channel, ucid).set(freq_hz)
