@@ -2,9 +2,10 @@ services:
   arris-exporter:
     image: ghcr.io/slother/arris-exporter:latest
     container_name: arris-exporter
-    network_mode: host
+    ports:
+      - "9120:9120"
     restart: unless-stopped
-    command: ["--port", "9120", "--interval", "30"]
+    command: ["--port", "9120", "--interval", "60"]
 
   prometheus:
     image: prom/prometheus:latest
