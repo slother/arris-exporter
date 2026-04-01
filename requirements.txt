@@ -1,0 +1,4 @@
+prometheus_client>=0.20
+requests>=2.31
+beautifulsoup4>=4.12
+pytest>=8.0
