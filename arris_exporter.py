@@ -383,6 +383,11 @@ def scrape(base_url: str) -> None:
         scrape_duration.set(time.monotonic() - start)
         return
 
+    # Clear channel metrics to remove stale label combinations
+    for metric in (ds_power, ds_snr, ds_octets, ds_correcteds, ds_uncorrectables,
+                   ds_frequency, ds_active, us_power, us_frequency, us_symbol_rate, us_active):
+        metric._metrics.clear()
+
     # --- Downstream ---
     tables = soup.find_all("table", attrs={"border": "2"})
     if len(tables) >= 1:
