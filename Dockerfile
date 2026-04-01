@@ -8,7 +8,8 @@ LABEL org.opencontainers.image.title="arris-exporter" \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    rm -rf /root/.cache
 
 COPY arris_exporter.py .
 

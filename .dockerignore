@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+.pytest_cache/
+tests/
+dumps/
+.git/
+.github/
+*.pyc
+*.md
+LICENSE
+docker-compose.yml
+prometheus.yml
+renovate.json

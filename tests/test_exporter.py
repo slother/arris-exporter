@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import requests
-from prometheus_client import CollectorRegistry
 
-import arris_exporter
-from arris_exporter import ArrisCollector, parse_float, parse_int, parse_uptime
+from arris_exporter import ArrisCollector, __version__, parse_float, parse_int, parse_uptime
 
 
 # ---------------------------------------------------------------------------
@@ -228,13 +226,15 @@ def _collect(side_effect=None, **route_kwargs):
     if side_effect is None:
         side_effect = _route(**route_kwargs)
 
-    collector = ArrisCollector("http://test/cgi-bin")
-    with patch("arris_exporter.requests.get", side_effect=side_effect):
-        result: dict[str, list[tuple[dict, float]]] = {}
-        for metric_family in collector.collect():
-            for sample in metric_family.samples:
-                result.setdefault(sample.name, []).append((sample.labels, sample.value))
-        return result
+    mock_session = MagicMock()
+    mock_session.get.side_effect = side_effect
+    collector = ArrisCollector("http://test/cgi-bin", session=mock_session)
+
+    result: dict[str, list[tuple[dict, float]]] = {}
+    for metric_family in collector.collect():
+        for sample in metric_family.samples:
+            result.setdefault(sample.name, []).append((sample.labels, sample.value))
+    return result
 
 
 def _val(metrics, name, labels=None):
@@ -595,6 +595,16 @@ class TestComputers:
 
 
 # ===========================================================================
+# Build info
+# ===========================================================================
+
+class TestBuildInfo:
+    def test_version(self):
+        m = _collect()
+        assert _val(m, "arris_exporter_build_info", {"version": __version__}) == 1
+
+
+# ===========================================================================
 # Scrape health
 # ===========================================================================
 
@@ -620,14 +630,15 @@ class TestScrapeHealth:
 
 class TestAllUrlsFetched:
     def test_fetches_four_urls(self):
-        with patch("arris_exporter.requests.get", side_effect=_route()) as mock_get:
-            collector = ArrisCollector("http://test/cgi-bin")
-            list(collector.collect())
-            urls = [call.args[0] for call in mock_get.call_args_list]
-            assert "http://test/cgi-bin/status_cgi" in urls
-            assert "http://test/cgi-bin/cm_state_cgi" in urls
-            assert "http://test/cgi-bin/event_cgi" in urls
-            assert "http://test/cgi-bin/vers_cgi" in urls
+        mock_session = MagicMock()
+        mock_session.get.side_effect = _route()
+        collector = ArrisCollector("http://test/cgi-bin", session=mock_session)
+        list(collector.collect())
+        urls = [call.args[0] for call in mock_session.get.call_args_list]
+        assert "http://test/cgi-bin/status_cgi" in urls
+        assert "http://test/cgi-bin/cm_state_cgi" in urls
+        assert "http://test/cgi-bin/event_cgi" in urls
+        assert "http://test/cgi-bin/vers_cgi" in urls
 
 
 # ===========================================================================
@@ -637,25 +648,26 @@ class TestAllUrlsFetched:
 class TestNoStaleMetrics:
     def test_channel_disappears_between_scrapes(self):
         """When a channel goes from active to inactive, old active=1 entry must not persist."""
-        collector = ArrisCollector("http://test/cgi-bin")
+        mock_session = MagicMock()
+        collector = ArrisCollector("http://test/cgi-bin", session=mock_session)
 
         # First scrape: 2 active channels
-        with patch("arris_exporter.requests.get", side_effect=_route(status_html=STATUS_CGI_HTML)):
-            m1: dict[str, list] = {}
-            for mf in collector.collect():
-                for s in mf.samples:
-                    m1.setdefault(s.name, []).append((s.labels, s.value))
-            active1 = [v for _, v in m1.get("arris_downstream_channel_active", [])]
-            assert active1.count(1) == 2
+        mock_session.get.side_effect = _route(status_html=STATUS_CGI_HTML)
+        m1: dict[str, list] = {}
+        for mf in collector.collect():
+            for s in mf.samples:
+                m1.setdefault(s.name, []).append((s.labels, s.value))
+        active1 = [v for _, v in m1.get("arris_downstream_channel_active", [])]
+        assert active1.count(1) == 2
 
         # Second scrape: 1 active, 1 inactive
-        with patch("arris_exporter.requests.get", side_effect=_route(status_html=STATUS_CGI_WITH_INACTIVE_HTML)):
-            m2: dict[str, list] = {}
-            for mf in collector.collect():
-                for s in mf.samples:
-                    m2.setdefault(s.name, []).append((s.labels, s.value))
-            active2 = [(l, v) for l, v in m2.get("arris_downstream_channel_active", [])]
-            assert len(active2) == 2
-            values = [v for _, v in active2]
-            assert values.count(1) == 1
-            assert values.count(0) == 1
+        mock_session.get.side_effect = _route(status_html=STATUS_CGI_WITH_INACTIVE_HTML)
+        m2: dict[str, list] = {}
+        for mf in collector.collect():
+            for s in mf.samples:
+                m2.setdefault(s.name, []).append((s.labels, s.value))
+        active2 = [(l, v) for l, v in m2.get("arris_downstream_channel_active", [])]
+        assert len(active2) == 2
+        values = [v for _, v in active2]
+        assert values.count(1) == 1
+        assert values.count(0) == 1
