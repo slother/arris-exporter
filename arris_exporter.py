@@ -8,6 +8,7 @@ Prometheus scrape — no stale label problems.
 from __future__ import annotations
 
 import argparse
+import logging
 import re
 import sys
 import time
@@ -18,9 +19,11 @@ from prometheus_client import (
     CollectorRegistry,
     start_http_server,
 )
-from prometheus_client.core import GaugeMetricFamily, InfoMetricFamily
+from prometheus_client.core import GaugeMetricFamily
 
 MODEM_BASE = "http://192.168.100.1/cgi-bin"
+
+log = logging.getLogger("arris_exporter")
 
 
 def parse_float(text: str) -> float:
@@ -49,12 +52,14 @@ def parse_uptime(text: str) -> int:
 
 def fetch_page(url: str) -> BeautifulSoup | None:
     """Fetch a modem page and return parsed soup, or None on failure."""
+    log.debug("Fetching %s", url)
     try:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
+        log.debug("Fetched %s (%d bytes)", url, len(resp.text))
         return BeautifulSoup(resp.text, "html.parser")
     except requests.RequestException as e:
-        print(f"[ERROR] Failed to fetch {url}: {e}", file=sys.stderr)
+        log.error("Failed to fetch %s: %s", url, e)
         return None
 
 
@@ -65,6 +70,7 @@ class ArrisCollector:
         self.base_url = base_url
 
     def collect(self):
+        log.info("Scrape started")
         start = time.monotonic()
         success = 1
 
@@ -212,6 +218,7 @@ class ArrisCollector:
         # ===== Scrape status_cgi =====
         soup = fetch_page(f"{self.base_url}/status_cgi")
         if soup is None:
+            log.warning("status_cgi unavailable, skipping RF metrics")
             success = 0
         else:
             tables = soup.find_all("table", attrs={"border": "2"})
@@ -236,6 +243,7 @@ class ArrisCollector:
                             correcteds = parse_int(text[7])
                             uncorr = parse_int(text[8])
                         except ValueError:
+                            log.debug("%s (dcid=%s, %s MHz) inactive — no signal data", channel, dcid, freq_mhz)
                             ds_active.add_metric([channel, dcid, freq_mhz], 0)
                             continue
 
@@ -265,6 +273,7 @@ class ArrisCollector:
                             sym_rate = parse_float(text[5])
                             modulation = text[6]
                         except ValueError:
+                            log.debug("%s (ucid=%s, %s MHz) inactive — no signal data", channel, ucid, freq_mhz)
                             us_active.add_metric([channel, ucid, freq_mhz], 0)
                             continue
 
@@ -420,8 +429,16 @@ class ArrisCollector:
         scrape_ok.add_metric([], success)
         scrape_dur.add_metric([], elapsed)
 
+        ds_total = len(ds_active.samples)
+        ds_locked = sum(1 for s in ds_active.samples if s.value == 1)
+        us_total = len(us_active.samples)
+        us_locked = sum(1 for s in us_active.samples if s.value == 1)
+
         if success:
-            print(f"[OK] Scraped modem in {elapsed:.2f}s")
+            log.info("Scrape completed in %.2fs — DS: %d/%d locked, US: %d/%d locked",
+                     elapsed, ds_locked, ds_total, us_locked, us_total)
+        else:
+            log.warning("Scrape failed after %.2fs", elapsed)
 
         yield ds_power
         yield ds_snr
@@ -455,13 +472,23 @@ def main():
     parser = argparse.ArgumentParser(description="Arris Touchstone modem Prometheus exporter")
     parser.add_argument("--port", type=int, default=9120, help="Exporter listen port (default: 9120)")
     parser.add_argument("--base-url", default=MODEM_BASE, help="Modem CGI base URL")
+    parser.add_argument("--log-level", default="info",
+                        choices=["debug", "info", "warning", "error"],
+                        help="Log level (default: info)")
     args = parser.parse_args()
+
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        level=getattr(logging, args.log_level.upper()),
+    )
 
     registry = CollectorRegistry()
     registry.register(ArrisCollector(args.base_url))
 
-    print(f"Starting Arris exporter on :{args.port}, scraping {args.base_url}")
+    log.info("Starting Arris exporter on :%d, target %s", args.port, args.base_url)
     start_http_server(args.port, registry=registry)
+    log.info("Listening on :%d/metrics", args.port)
 
     # Block forever — Prometheus scrapes trigger collect()
     import threading
