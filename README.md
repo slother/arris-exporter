@@ -16,6 +16,7 @@ Tested with Arris/ARRIS Touchstone modems (status page at `http://192.168.100.1/
 | `arris_downstream_octets_total` | Received octets |
 | `arris_downstream_correcteds_total` | FEC corrected codewords |
 | `arris_downstream_uncorrectables_total` | FEC uncorrectable codewords |
+| `arris_downstream_channel_active` | Channel active (1 = locked, 0 = no signal) |
 
 ### Upstream (per channel)
 
@@ -24,6 +25,7 @@ Tested with Arris/ARRIS Touchstone modems (status page at `http://192.168.100.1/
 | `arris_upstream_power_dbmv` | Power level (dBmV) |
 | `arris_upstream_frequency_hz` | Channel frequency (Hz) |
 | `arris_upstream_symbol_rate_ksps` | Symbol rate (kSym/s) |
+| `arris_upstream_channel_active` | Channel active (1 = locked, 0 = no signal) |
 
 ### Modem Status
 
@@ -33,6 +35,7 @@ Tested with Arris/ARRIS Touchstone modems (status page at `http://192.168.100.1/
 | `arris_cm_status` | CM operational status (operational / offline / other) |
 | `arris_interface_up` | Interface state (1 = Up, 0 = Down) |
 | `arris_interface_speed_mbps` | Interface speed (Mbps) |
+| `arris_computers_detected` | Number of detected CPEs, labeled by type (static/dynamic) |
 
 ### DOCSIS Registration (CM State)
 
@@ -43,6 +46,20 @@ Tested with Arris/ARRIS Touchstone modems (status page at `http://192.168.100.1/
 | `arris_bpi_authorized` | BPI authorized (1/0) |
 | `arris_dhcp_attempts_ipv4` | DHCP IPv4 attempt count |
 | `arris_dhcp_attempts_ipv6` | DHCP IPv6 attempt count |
+
+### Event Log
+
+| Metric | Description |
+|---|---|
+| `arris_event_log_total` | Total number of events in the event log |
+| `arris_event_log_by_level_total` | Event count by severity level |
+
+### Modem Info
+
+| Metric | Description |
+|---|---|
+| `arris_modem_info` | Hardware/firmware info label metric (model, serial, HW/SW rev, firmware) |
+| `arris_exporter_build_info` | Exporter version (always 1) |
 
 ### Scrape Health
 
@@ -68,8 +85,8 @@ The exporter listens on port `9120` by default. Metrics are available at `http:/
 
 ```
 --port PORT        Exporter listen port (default: 9120)
---interval SECS    Scrape interval in seconds (default: 30)
 --base-url URL     Modem CGI base URL (default: http://192.168.100.1/cgi-bin)
+--log-level LEVEL  Log level: debug, info, warning, error (default: info)
 ```
 
 ## Docker
