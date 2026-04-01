@@ -63,6 +63,12 @@ ds_frequency = Gauge(
     ["channel", "dcid"],
     registry=registry,
 )
+ds_active = Gauge(
+    "arris_downstream_channel_active",
+    "Downstream channel active (1 = locked, 0 = no signal)",
+    ["channel", "dcid", "frequency_mhz"],
+    registry=registry,
+)
 
 # -- Upstream --
 us_power = Gauge(
@@ -81,6 +87,12 @@ us_symbol_rate = Gauge(
     "arris_upstream_symbol_rate_ksps",
     "Upstream symbol rate in kSym/s",
     ["channel", "ucid"],
+    registry=registry,
+)
+us_active = Gauge(
+    "arris_upstream_channel_active",
+    "Upstream channel active (1 = locked, 0 = no signal)",
+    ["channel", "ucid", "frequency_mhz"],
     registry=registry,
 )
 
@@ -381,9 +393,9 @@ def scrape(base_url: str) -> None:
                 continue
             text = [c.get_text(strip=True) for c in cells]
             if text[0].startswith("Downstream"):
+                channel = text[0]
+                dcid = text[1]
                 try:
-                    channel = text[0]
-                    dcid = text[1]
                     freq_mhz = str(parse_float(text[2]))
                     freq_hz = parse_float(text[2]) * 1e6
                     power = parse_float(text[3])
@@ -393,8 +405,10 @@ def scrape(base_url: str) -> None:
                     correcteds = parse_int(text[7])
                     uncorrectables = parse_int(text[8])
                 except ValueError:
+                    ds_active.labels(channel, dcid, text[2]).set(0)
                     continue
 
+                ds_active.labels(channel, dcid, freq_mhz).set(1)
                 labels = [channel, dcid, freq_mhz, modulation]
                 ds_power.labels(*labels).set(power)
                 ds_snr.labels(*labels).set(snr)
@@ -412,9 +426,9 @@ def scrape(base_url: str) -> None:
                 continue
             text = [c.get_text(strip=True) for c in cells]
             if text[0].startswith("Upstream"):
+                channel = text[0]
+                ucid = text[1]
                 try:
-                    channel = text[0]
-                    ucid = text[1]
                     freq_mhz = str(parse_float(text[2]))
                     freq_hz = parse_float(text[2]) * 1e6
                     power = parse_float(text[3])
@@ -422,8 +436,10 @@ def scrape(base_url: str) -> None:
                     sym_rate = parse_float(text[5])
                     modulation = text[6]
                 except ValueError:
+                    us_active.labels(channel, ucid, text[2]).set(0)
                     continue
 
+                us_active.labels(channel, ucid, freq_mhz).set(1)
                 us_power.labels(channel, ucid, freq_mhz, modulation, channel_type).set(power)
                 us_frequency.labels(channel, ucid).set(freq_hz)
                 us_symbol_rate.labels(channel, ucid).set(sym_rate)
