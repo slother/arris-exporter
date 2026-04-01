@@ -108,6 +108,16 @@ prometheus.scrape "arris_modem" {
 }
 ```
 
+## Grafana Dashboard
+
+A ready-to-import dashboard is included in [`grafana/dashboard.json`](grafana/dashboard.json).
+
+To import: Grafana → Dashboards → Import → Upload JSON file → select the Prometheus datasource.
+
+![Modem status, channel activity, and DOCSIS registration](docs/images/dashboard-overview.png)
+
+![Downstream power, SNR, FEC errors, and signal history](docs/images/dashboard-signal.png)
+
 ## Useful Alerts
 
 ```yaml
