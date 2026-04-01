@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Prometheus exporter for Arris Touchstone cable modem (DOCSIS)."""
+"""Prometheus exporter for Arris Touchstone cable modem (DOCSIS).
+
+Uses a Custom Collector so metrics are generated fresh on each
+Prometheus scrape — no stale label problems.
+"""
 
 from __future__ import annotations
 
@@ -12,185 +16,11 @@ import requests
 from bs4 import BeautifulSoup
 from prometheus_client import (
     CollectorRegistry,
-    Enum,
-    Gauge,
     start_http_server,
 )
+from prometheus_client.core import GaugeMetricFamily, InfoMetricFamily
 
 MODEM_BASE = "http://192.168.100.1/cgi-bin"
-MODEM_STATUS_URL = f"{MODEM_BASE}/status_cgi"
-MODEM_CM_STATE_URL = f"{MODEM_BASE}/cm_state_cgi"
-MODEM_EVENT_URL = f"{MODEM_BASE}/event_cgi"
-MODEM_VERS_URL = f"{MODEM_BASE}/vers_cgi"
-SCRAPE_INTERVAL = 30
-
-registry = CollectorRegistry()
-
-# -- Downstream --
-ds_power = Gauge(
-    "arris_downstream_power_dbmv",
-    "Downstream channel power level in dBmV",
-    ["channel", "dcid", "frequency_mhz", "modulation"],
-    registry=registry,
-)
-ds_snr = Gauge(
-    "arris_downstream_snr_db",
-    "Downstream channel SNR in dB",
-    ["channel", "dcid", "frequency_mhz", "modulation"],
-    registry=registry,
-)
-ds_octets = Gauge(
-    "arris_downstream_octets_total",
-    "Downstream octets received (resets on modem reboot)",
-    ["channel", "dcid", "frequency_mhz"],
-    registry=registry,
-)
-ds_correcteds = Gauge(
-    "arris_downstream_correcteds_total",
-    "Downstream FEC corrected codewords",
-    ["channel", "dcid", "frequency_mhz"],
-    registry=registry,
-)
-ds_uncorrectables = Gauge(
-    "arris_downstream_uncorrectables_total",
-    "Downstream FEC uncorrectable codewords",
-    ["channel", "dcid", "frequency_mhz"],
-    registry=registry,
-)
-ds_frequency = Gauge(
-    "arris_downstream_frequency_hz",
-    "Downstream channel frequency in Hz",
-    ["channel", "dcid"],
-    registry=registry,
-)
-ds_active = Gauge(
-    "arris_downstream_channel_active",
-    "Downstream channel active (1 = locked, 0 = no signal)",
-    ["channel", "dcid", "frequency_mhz"],
-    registry=registry,
-)
-
-# -- Upstream --
-us_power = Gauge(
-    "arris_upstream_power_dbmv",
-    "Upstream channel power level in dBmV",
-    ["channel", "ucid", "frequency_mhz", "modulation", "channel_type"],
-    registry=registry,
-)
-us_frequency = Gauge(
-    "arris_upstream_frequency_hz",
-    "Upstream channel frequency in Hz",
-    ["channel", "ucid"],
-    registry=registry,
-)
-us_symbol_rate = Gauge(
-    "arris_upstream_symbol_rate_ksps",
-    "Upstream symbol rate in kSym/s",
-    ["channel", "ucid"],
-    registry=registry,
-)
-us_active = Gauge(
-    "arris_upstream_channel_active",
-    "Upstream channel active (1 = locked, 0 = no signal)",
-    ["channel", "ucid", "frequency_mhz"],
-    registry=registry,
-)
-
-# -- Status --
-uptime_seconds = Gauge(
-    "arris_uptime_seconds",
-    "Modem uptime in seconds",
-    registry=registry,
-)
-cm_status = Enum(
-    "arris_cm_status",
-    "Cable modem operational status",
-    states=["operational", "offline", "other"],
-    registry=registry,
-)
-
-# -- Interfaces --
-iface_up = Gauge(
-    "arris_interface_up",
-    "Interface state (1 = Up, 0 = Down)",
-    ["interface", "mac_address"],
-    registry=registry,
-)
-iface_speed = Gauge(
-    "arris_interface_speed_mbps",
-    "Interface speed in Mbps",
-    ["interface", "mac_address"],
-    registry=registry,
-)
-
-# -- CM State (registration) --
-docsis_step_completed = Gauge(
-    "arris_docsis_step_completed",
-    "DOCSIS registration step status (1 = Completed, 0 = not)",
-    ["step"],
-    registry=registry,
-)
-tod_retrieved = Gauge(
-    "arris_tod_retrieved",
-    "Time of Day retrieved (1 = yes, 0 = no)",
-    registry=registry,
-)
-bpi_authorized = Gauge(
-    "arris_bpi_authorized",
-    "BPI authorized (1 = yes, 0 = no)",
-    registry=registry,
-)
-dhcp_attempts_ipv4 = Gauge(
-    "arris_dhcp_attempts_ipv4",
-    "DHCP IPv4 attempts to obtain CM IP address",
-    registry=registry,
-)
-dhcp_attempts_ipv6 = Gauge(
-    "arris_dhcp_attempts_ipv6",
-    "DHCP IPv6 attempts to obtain CM IP address",
-    registry=registry,
-)
-
-# -- Event log --
-event_log_total = Gauge(
-    "arris_event_log_total",
-    "Total number of events in the event log",
-    registry=registry,
-)
-event_log_by_level = Gauge(
-    "arris_event_log_by_level_total",
-    "Number of events in the event log by severity level",
-    ["level"],
-    registry=registry,
-)
-
-# -- HW/FW version info --
-modem_info = Gauge(
-    "arris_modem_info",
-    "Modem hardware and firmware information (always 1)",
-    ["model", "serial_number", "hw_rev", "sw_rev", "firmware_name", "firmware_build_time"],
-    registry=registry,
-)
-
-# -- Computers detected --
-computers_detected = Gauge(
-    "arris_computers_detected",
-    "Number of computers detected by the modem",
-    ["type"],
-    registry=registry,
-)
-
-# -- Scrape health --
-scrape_success = Gauge(
-    "arris_scrape_success",
-    "Whether the last scrape was successful (1 = yes, 0 = no)",
-    registry=registry,
-)
-scrape_duration = Gauge(
-    "arris_scrape_duration_seconds",
-    "Duration of the last scrape in seconds",
-    registry=registry,
-)
 
 
 def parse_float(text: str) -> float:
@@ -228,304 +58,414 @@ def fetch_page(url: str) -> BeautifulSoup | None:
         return None
 
 
-def scrape_event_log(base_url: str) -> bool:
-    """Scrape the event log page."""
-    url = f"{base_url}/event_cgi"
-    soup = fetch_page(url)
-    if soup is None:
-        return False
+class ArrisCollector:
+    """Custom Prometheus collector for Arris Touchstone cable modems."""
 
-    table = soup.find("table", attrs={"border": "1"})
-    if table is None:
-        return True
+    def __init__(self, base_url: str):
+        self.base_url = base_url
 
-    total = 0
-    level_counts: dict[str, int] = {}
-    for row in table.find_all("tr"):
-        cells = row.find_all("td")
-        if len(cells) < 4:
-            continue
-        # Skip header row (contains <b> tags)
-        if cells[0].find("b"):
-            continue
-        total += 1
-        level = cells[2].get_text(strip=True)
-        level_counts[level] = level_counts.get(level, 0) + 1
+    def collect(self):
+        start = time.monotonic()
+        success = 1
 
-    event_log_total.set(total)
-    for level, count in level_counts.items():
-        event_log_by_level.labels(level).set(count)
+        # -- Downstream --
+        ds_power = GaugeMetricFamily(
+            "arris_downstream_power_dbmv",
+            "Downstream channel power level in dBmV",
+            labels=["channel", "dcid", "frequency_mhz", "modulation"],
+        )
+        ds_snr = GaugeMetricFamily(
+            "arris_downstream_snr_db",
+            "Downstream channel SNR in dB",
+            labels=["channel", "dcid", "frequency_mhz", "modulation"],
+        )
+        ds_octets = GaugeMetricFamily(
+            "arris_downstream_octets_total",
+            "Downstream octets received (resets on modem reboot)",
+            labels=["channel", "dcid", "frequency_mhz"],
+        )
+        ds_correcteds = GaugeMetricFamily(
+            "arris_downstream_correcteds_total",
+            "Downstream FEC corrected codewords",
+            labels=["channel", "dcid", "frequency_mhz"],
+        )
+        ds_uncorrectables = GaugeMetricFamily(
+            "arris_downstream_uncorrectables_total",
+            "Downstream FEC uncorrectable codewords",
+            labels=["channel", "dcid", "frequency_mhz"],
+        )
+        ds_frequency = GaugeMetricFamily(
+            "arris_downstream_frequency_hz",
+            "Downstream channel frequency in Hz",
+            labels=["channel", "dcid"],
+        )
+        ds_active = GaugeMetricFamily(
+            "arris_downstream_channel_active",
+            "Downstream channel active (1 = locked, 0 = no signal)",
+            labels=["channel", "dcid", "frequency_mhz"],
+        )
 
-    return True
+        # -- Upstream --
+        us_power = GaugeMetricFamily(
+            "arris_upstream_power_dbmv",
+            "Upstream channel power level in dBmV",
+            labels=["channel", "ucid", "frequency_mhz", "modulation", "channel_type"],
+        )
+        us_frequency = GaugeMetricFamily(
+            "arris_upstream_frequency_hz",
+            "Upstream channel frequency in Hz",
+            labels=["channel", "ucid"],
+        )
+        us_symbol_rate = GaugeMetricFamily(
+            "arris_upstream_symbol_rate_ksps",
+            "Upstream symbol rate in kSym/s",
+            labels=["channel", "ucid"],
+        )
+        us_active = GaugeMetricFamily(
+            "arris_upstream_channel_active",
+            "Upstream channel active (1 = locked, 0 = no signal)",
+            labels=["channel", "ucid", "frequency_mhz"],
+        )
 
+        # -- Status --
+        uptime = GaugeMetricFamily(
+            "arris_uptime_seconds",
+            "Modem uptime in seconds",
+        )
+        cm_status = GaugeMetricFamily(
+            "arris_cm_status",
+            "Cable modem operational status",
+            labels=["arris_cm_status"],
+        )
 
-def scrape_vers(base_url: str) -> bool:
-    """Scrape the HW/FW versions page."""
-    url = f"{base_url}/vers_cgi"
-    soup = fetch_page(url)
-    if soup is None:
-        return False
+        # -- Interfaces --
+        iface_up = GaugeMetricFamily(
+            "arris_interface_up",
+            "Interface state (1 = Up, 0 = Down)",
+            labels=["interface", "mac_address"],
+        )
+        iface_speed = GaugeMetricFamily(
+            "arris_interface_speed_mbps",
+            "Interface speed in Mbps",
+            labels=["interface", "mac_address"],
+        )
 
-    text = soup.get_text()
+        # -- Computers detected --
+        computers = GaugeMetricFamily(
+            "arris_computers_detected",
+            "Number of computers detected by the modem",
+            labels=["type"],
+        )
 
-    model = ""
-    serial_number = ""
-    hw_rev = ""
-    sw_rev = ""
-    firmware_name = ""
-    firmware_build_time = ""
+        # -- CM State --
+        docsis_step = GaugeMetricFamily(
+            "arris_docsis_step_completed",
+            "DOCSIS registration step status (1 = Completed, 0 = not)",
+            labels=["step"],
+        )
+        tod = GaugeMetricFamily(
+            "arris_tod_retrieved",
+            "Time of Day retrieved (1 = yes, 0 = no)",
+        )
+        bpi = GaugeMetricFamily(
+            "arris_bpi_authorized",
+            "BPI authorized (1 = yes, 0 = no)",
+        )
+        dhcp_v4 = GaugeMetricFamily(
+            "arris_dhcp_attempts_ipv4",
+            "DHCP IPv4 attempts to obtain CM IP address",
+        )
+        dhcp_v6 = GaugeMetricFamily(
+            "arris_dhcp_attempts_ipv6",
+            "DHCP IPv6 attempts to obtain CM IP address",
+        )
 
-    # Parse the system info block
-    m = re.search(r"MODEL:\s*(.+)", text)
-    if m:
-        model = m.group(1).strip()
+        # -- Event log --
+        evt_total = GaugeMetricFamily(
+            "arris_event_log_total",
+            "Total number of events in the event log",
+        )
+        evt_by_level = GaugeMetricFamily(
+            "arris_event_log_by_level_total",
+            "Number of events in the event log by severity level",
+            labels=["level"],
+        )
 
-    m = re.search(r"HW_REV:\s*(.+)", text)
-    if m:
-        hw_rev = m.group(1).strip()
+        # -- HW/FW info --
+        modem_info = GaugeMetricFamily(
+            "arris_modem_info",
+            "Modem hardware and firmware information (always 1)",
+            labels=["model", "serial_number", "hw_rev", "sw_rev",
+                    "firmware_name", "firmware_build_time"],
+        )
 
-    m = re.search(r"SW_REV:\s*(.+)", text)
-    if m:
-        sw_rev = m.group(1).strip()
+        # -- Scrape health --
+        scrape_ok = GaugeMetricFamily(
+            "arris_scrape_success",
+            "Whether the last scrape was successful (1 = yes, 0 = no)",
+        )
+        scrape_dur = GaugeMetricFamily(
+            "arris_scrape_duration_seconds",
+            "Duration of the last scrape in seconds",
+        )
 
-    # Parse serial number from table
-    m = re.search(r"Serial\s*Number:\s*(.+)", text)
-    if m:
-        serial_number = m.group(1).strip()
+        # ===== Scrape status_cgi =====
+        soup = fetch_page(f"{self.base_url}/status_cgi")
+        if soup is None:
+            success = 0
+        else:
+            tables = soup.find_all("table", attrs={"border": "2"})
 
-    # Parse firmware info from table
-    tables = soup.find_all("table", attrs={"cellpadding": "0", "cellspacing": "0"})
-    for tbl in tables:
-        for row in tbl.find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) < 2:
-                continue
-            label = cells[0].get_text(strip=True).lower()
-            value = cells[1].get_text(strip=True)
-            if "firmware name" in label:
-                firmware_name = value
-            elif "firmware build time" in label:
-                firmware_build_time = value
+            # --- Downstream ---
+            if len(tables) >= 1:
+                for row in tables[0].find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) < 9:
+                        continue
+                    text = [c.get_text(strip=True) for c in cells]
+                    if text[0].startswith("Downstream"):
+                        channel = text[0]
+                        dcid = text[1]
+                        freq_mhz = str(parse_float(text[2]))
+                        try:
+                            freq_hz = parse_float(text[2]) * 1e6
+                            power = parse_float(text[3])
+                            snr = parse_float(text[4])
+                            modulation = text[5]
+                            octets = parse_int(text[6])
+                            correcteds = parse_int(text[7])
+                            uncorr = parse_int(text[8])
+                        except ValueError:
+                            ds_active.add_metric([channel, dcid, freq_mhz], 0)
+                            continue
 
-    modem_info.labels(
-        model=model,
-        serial_number=serial_number,
-        hw_rev=hw_rev,
-        sw_rev=sw_rev,
-        firmware_name=firmware_name,
-        firmware_build_time=firmware_build_time,
-    ).set(1)
+                        ds_active.add_metric([channel, dcid, freq_mhz], 1)
+                        ds_power.add_metric([channel, dcid, freq_mhz, modulation], power)
+                        ds_snr.add_metric([channel, dcid, freq_mhz, modulation], snr)
+                        ds_octets.add_metric([channel, dcid, freq_mhz], octets)
+                        ds_correcteds.add_metric([channel, dcid, freq_mhz], correcteds)
+                        ds_uncorrectables.add_metric([channel, dcid, freq_mhz], uncorr)
+                        ds_frequency.add_metric([channel, dcid], freq_hz)
 
-    return True
+            # --- Upstream ---
+            if len(tables) >= 2:
+                for row in tables[1].find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) < 7:
+                        continue
+                    text = [c.get_text(strip=True) for c in cells]
+                    if text[0].startswith("Upstream"):
+                        channel = text[0]
+                        ucid = text[1]
+                        freq_mhz = str(parse_float(text[2]))
+                        try:
+                            freq_hz = parse_float(text[2]) * 1e6
+                            power = parse_float(text[3])
+                            channel_type = text[4]
+                            sym_rate = parse_float(text[5])
+                            modulation = text[6]
+                        except ValueError:
+                            us_active.add_metric([channel, ucid, freq_mhz], 0)
+                            continue
 
+                        us_active.add_metric([channel, ucid, freq_mhz], 1)
+                        us_power.add_metric([channel, ucid, freq_mhz, modulation, channel_type], power)
+                        us_frequency.add_metric([channel, ucid], freq_hz)
+                        us_symbol_rate.add_metric([channel, ucid], sym_rate)
 
-def scrape_cm_state(base_url: str) -> bool:
-    """Scrape the CM State / registration page."""
-    url = f"{base_url}/cm_state_cgi"
-    soup = fetch_page(url)
-    if soup is None:
-        return False
+            # --- Status ---
+            status_tables = soup.find_all("table", attrs={"cellpadding": "0", "cellspacing": "0"})
+            cm_state_val = {"operational": 0, "offline": 0, "other": 0}
+            for tbl in status_tables:
+                for row in tbl.find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) < 2:
+                        continue
+                    label = cells[0].get_text(strip=True).lower()
+                    value = cells[1].get_text(strip=True)
 
-    tables = soup.find_all("table", attrs={"border": "1"})
+                    if "uptime" in label:
+                        uptime.add_metric([], parse_uptime(value))
+                    elif "computers detected" in label:
+                        for cpe_match in re.finditer(r"(static|dynamic)CPE\((\d+)\)", value):
+                            computers.add_metric([cpe_match.group(1)], int(cpe_match.group(2)))
+                    elif "cm status" in label:
+                        status = value.lower()
+                        if status == "operational":
+                            cm_state_val["operational"] = 1
+                        elif status in ("offline", "not operational"):
+                            cm_state_val["offline"] = 1
+                        else:
+                            cm_state_val["other"] = 1
 
-    # DOCSIS registration steps (first table)
-    if len(tables) >= 1:
-        for row in tables[0].find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) < 2:
-                continue
-            step = cells[0].get_text(strip=True)
-            status = cells[1].get_text(strip=True).lower()
-            docsis_step_completed.labels(step).set(1 if status == "completed" else 0)
+            for state, val in cm_state_val.items():
+                cm_status.add_metric([state], val)
 
-    # TOD State (second table)
-    if len(tables) >= 2:
-        for row in tables[1].find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) >= 2:
-                status = cells[1].get_text(strip=True).lower()
-                tod_retrieved.set(1 if status == "retrieved" else 0)
+            # --- Interfaces ---
+            if len(tables) >= 3:
+                for row in tables[2].find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) < 5:
+                        continue
+                    text = [c.get_text(strip=True) for c in cells]
+                    name = text[0]
+                    if name in ("Interface Name", ""):
+                        continue
+                    state = text[2]
+                    speed_str = text[3]
+                    mac = text[4]
 
-    # BPI State (third table)
-    if len(tables) >= 3:
-        for row in tables[2].find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) >= 2:
-                status = cells[1].get_text(strip=True).lower()
-                bpi_authorized.set(1 if "authorized" in status else 0)
+                    iface_up.add_metric([name, mac], 1 if state.lower() == "up" else 0)
+                    try:
+                        iface_speed.add_metric([name, mac], parse_float(speed_str))
+                    except ValueError:
+                        iface_speed.add_metric([name, mac], 0)
 
-    # DHCP Attempts (fourth table)
-    if len(tables) >= 4:
-        for row in tables[3].find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) < 2:
-                continue
-            label = cells[0].get_text(strip=True).lower()
-            try:
-                value = parse_int(cells[1].get_text(strip=True))
-            except ValueError:
-                continue
-            if "ipv4" in label:
-                dhcp_attempts_ipv4.set(value)
-            elif "ipv6" in label:
-                dhcp_attempts_ipv6.set(value)
+        # ===== Scrape cm_state_cgi =====
+        cm_soup = fetch_page(f"{self.base_url}/cm_state_cgi")
+        if cm_soup is not None:
+            cm_tables = cm_soup.find_all("table", attrs={"border": "1"})
 
-    return True
+            if len(cm_tables) >= 1:
+                for row in cm_tables[0].find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) >= 2:
+                        step_name = cells[0].get_text(strip=True)
+                        step_status = cells[1].get_text(strip=True).lower()
+                        docsis_step.add_metric([step_name], 1 if step_status == "completed" else 0)
 
+            if len(cm_tables) >= 2:
+                for row in cm_tables[1].find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) >= 2:
+                        tod.add_metric([], 1 if cells[1].get_text(strip=True).lower() == "retrieved" else 0)
 
-def scrape(base_url: str) -> None:
-    start = time.monotonic()
+            if len(cm_tables) >= 3:
+                for row in cm_tables[2].find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) >= 2:
+                        bpi.add_metric([], 1 if "authorized" in cells[1].get_text(strip=True).lower() else 0)
 
-    status_url = f"{base_url}/status_cgi"
-    soup = fetch_page(status_url)
-    if soup is None:
-        scrape_success.set(0)
-        scrape_duration.set(time.monotonic() - start)
-        return
+            if len(cm_tables) >= 4:
+                for row in cm_tables[3].find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) < 2:
+                        continue
+                    lbl = cells[0].get_text(strip=True).lower()
+                    try:
+                        val = parse_int(cells[1].get_text(strip=True))
+                    except ValueError:
+                        continue
+                    if "ipv4" in lbl:
+                        dhcp_v4.add_metric([], val)
+                    elif "ipv6" in lbl:
+                        dhcp_v6.add_metric([], val)
 
-    # Clear channel metrics to remove stale label combinations
-    for metric in (ds_power, ds_snr, ds_octets, ds_correcteds, ds_uncorrectables,
-                   ds_frequency, ds_active, us_power, us_frequency, us_symbol_rate, us_active):
-        metric._metrics.clear()
+        # ===== Scrape event_cgi =====
+        evt_soup = fetch_page(f"{self.base_url}/event_cgi")
+        if evt_soup is not None:
+            table = evt_soup.find("table", attrs={"border": "1"})
+            if table is not None:
+                total = 0
+                level_counts: dict[str, int] = {}
+                for row in table.find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) < 4:
+                        continue
+                    if cells[0].find("b"):
+                        continue
+                    total += 1
+                    level = cells[2].get_text(strip=True)
+                    level_counts[level] = level_counts.get(level, 0) + 1
 
-    # --- Downstream ---
-    tables = soup.find_all("table", attrs={"border": "2"})
-    if len(tables) >= 1:
-        ds_table = tables[0]
-        for row in ds_table.find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) < 9:
-                continue
-            text = [c.get_text(strip=True) for c in cells]
-            if text[0].startswith("Downstream"):
-                channel = text[0]
-                dcid = text[1]
-                freq_mhz = str(parse_float(text[2]))
-                try:
-                    freq_hz = parse_float(text[2]) * 1e6
-                    power = parse_float(text[3])
-                    snr = parse_float(text[4])
-                    modulation = text[5]
-                    octets = parse_int(text[6])
-                    correcteds = parse_int(text[7])
-                    uncorrectables = parse_int(text[8])
-                except ValueError:
-                    ds_active.labels(channel, dcid, freq_mhz).set(0)
-                    continue
+                evt_total.add_metric([], total)
+                for level, count in level_counts.items():
+                    evt_by_level.add_metric([level], count)
 
-                ds_active.labels(channel, dcid, freq_mhz).set(1)
-                labels = [channel, dcid, freq_mhz, modulation]
-                ds_power.labels(*labels).set(power)
-                ds_snr.labels(*labels).set(snr)
-                ds_octets.labels(channel, dcid, freq_mhz).set(octets)
-                ds_correcteds.labels(channel, dcid, freq_mhz).set(correcteds)
-                ds_uncorrectables.labels(channel, dcid, freq_mhz).set(uncorrectables)
-                ds_frequency.labels(channel, dcid).set(freq_hz)
+        # ===== Scrape vers_cgi =====
+        vers_soup = fetch_page(f"{self.base_url}/vers_cgi")
+        if vers_soup is not None:
+            text = vers_soup.get_text()
+            model = hw_rev = sw_rev = serial = fw_name = fw_build = ""
 
-    # --- Upstream ---
-    if len(tables) >= 2:
-        us_table = tables[1]
-        for row in us_table.find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) < 7:
-                continue
-            text = [c.get_text(strip=True) for c in cells]
-            if text[0].startswith("Upstream"):
-                channel = text[0]
-                ucid = text[1]
-                freq_mhz = str(parse_float(text[2]))
-                try:
-                    freq_hz = parse_float(text[2]) * 1e6
-                    power = parse_float(text[3])
-                    channel_type = text[4]
-                    sym_rate = parse_float(text[5])
-                    modulation = text[6]
-                except ValueError:
-                    us_active.labels(channel, ucid, freq_mhz).set(0)
-                    continue
+            m = re.search(r"MODEL:\s*(.+)", text)
+            if m:
+                model = m.group(1).strip()
+            m = re.search(r"HW_REV:\s*(.+)", text)
+            if m:
+                hw_rev = m.group(1).strip()
+            m = re.search(r"SW_REV:\s*(.+)", text)
+            if m:
+                sw_rev = m.group(1).strip()
+            m = re.search(r"Serial\s*Number:\s*(.+)", text)
+            if m:
+                serial = m.group(1).strip()
 
-                us_active.labels(channel, ucid, freq_mhz).set(1)
-                us_power.labels(channel, ucid, freq_mhz, modulation, channel_type).set(power)
-                us_frequency.labels(channel, ucid).set(freq_hz)
-                us_symbol_rate.labels(channel, ucid).set(sym_rate)
+            for tbl in vers_soup.find_all("table", attrs={"cellpadding": "0", "cellspacing": "0"}):
+                for row in tbl.find_all("tr"):
+                    cells = row.find_all("td")
+                    if len(cells) < 2:
+                        continue
+                    lbl = cells[0].get_text(strip=True).lower()
+                    val = cells[1].get_text(strip=True)
+                    if "firmware name" in lbl:
+                        fw_name = val
+                    elif "firmware build time" in lbl:
+                        fw_build = val
 
-    # --- Status ---
-    status_tables = soup.find_all("table", attrs={"cellpadding": "0", "cellspacing": "0"})
-    for tbl in status_tables:
-        for row in tbl.find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) < 2:
-                continue
-            label = cells[0].get_text(strip=True).lower()
-            value = cells[1].get_text(strip=True)
+            modem_info.add_metric([model, serial, hw_rev, sw_rev, fw_name, fw_build], 1)
 
-            if "uptime" in label:
-                uptime_seconds.set(parse_uptime(value))
-            elif "computers detected" in label:
-                # Format: "staticCPE(0), dynamicCPE(1)"
-                for cpe_match in re.finditer(r"(static|dynamic)CPE\((\d+)\)", value):
-                    cpe_type = cpe_match.group(1)
-                    cpe_count = int(cpe_match.group(2))
-                    computers_detected.labels(cpe_type).set(cpe_count)
-            elif "cm status" in label:
-                status = value.lower()
-                if status == "operational":
-                    cm_status.state("operational")
-                elif status in ("offline", "not operational"):
-                    cm_status.state("offline")
-                else:
-                    cm_status.state("other")
+        # ===== Yield all metrics =====
+        elapsed = time.monotonic() - start
+        scrape_ok.add_metric([], success)
+        scrape_dur.add_metric([], elapsed)
 
-    # --- Interfaces ---
-    if len(tables) >= 3:
-        iface_table = tables[2]
-        for row in iface_table.find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) < 5:
-                continue
-            text = [c.get_text(strip=True) for c in cells]
-            name = text[0]
-            if name in ("Interface Name", ""):
-                continue
-            state = text[2]
-            speed_str = text[3]
-            mac = text[4]
+        if success:
+            print(f"[OK] Scraped modem in {elapsed:.2f}s")
 
-            iface_up.labels(name, mac).set(1 if state.lower() == "up" else 0)
-            try:
-                speed = parse_float(speed_str)
-                iface_speed.labels(name, mac).set(speed)
-            except ValueError:
-                iface_speed.labels(name, mac).set(0)
-
-    # --- CM State ---
-    scrape_cm_state(base_url)
-
-    # --- Event log ---
-    scrape_event_log(base_url)
-
-    # --- HW/FW Versions ---
-    scrape_vers(base_url)
-
-    elapsed = time.monotonic() - start
-    scrape_success.set(1)
-    scrape_duration.set(elapsed)
-    print(f"[OK] Scraped modem in {elapsed:.2f}s")
+        yield ds_power
+        yield ds_snr
+        yield ds_octets
+        yield ds_correcteds
+        yield ds_uncorrectables
+        yield ds_frequency
+        yield ds_active
+        yield us_power
+        yield us_frequency
+        yield us_symbol_rate
+        yield us_active
+        yield uptime
+        yield cm_status
+        yield iface_up
+        yield iface_speed
+        yield computers
+        yield docsis_step
+        yield tod
+        yield bpi
+        yield dhcp_v4
+        yield dhcp_v6
+        yield evt_total
+        yield evt_by_level
+        yield modem_info
+        yield scrape_ok
+        yield scrape_dur
 
 
 def main():
     parser = argparse.ArgumentParser(description="Arris Touchstone modem Prometheus exporter")
     parser.add_argument("--port", type=int, default=9120, help="Exporter listen port (default: 9120)")
-    parser.add_argument("--interval", type=int, default=SCRAPE_INTERVAL, help="Scrape interval in seconds (default: 30)")
     parser.add_argument("--base-url", default=MODEM_BASE, help="Modem CGI base URL")
     args = parser.parse_args()
 
-    print(f"Starting Arris exporter on :{args.port}, scraping {args.base_url} every {args.interval}s")
+    registry = CollectorRegistry()
+    registry.register(ArrisCollector(args.base_url))
+
+    print(f"Starting Arris exporter on :{args.port}, scraping {args.base_url}")
     start_http_server(args.port, registry=registry)
 
-    while True:
-        scrape(args.base_url)
-        time.sleep(args.interval)
+    # Block forever — Prometheus scrapes trigger collect()
+    import threading
+    threading.Event().wait()
 
 
 if __name__ == "__main__":
