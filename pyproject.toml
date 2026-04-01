@@ -1,0 +1,3 @@
+[tool.semantic_release]
+version_variables = ["arris_exporter.py:__version__"]
+commit_message = "release: {version}"
