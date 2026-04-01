@@ -93,7 +93,19 @@ scrape_configs:
   - job_name: arris_modem
     static_configs:
       - targets: ["localhost:9120"]
-    scrape_interval: 30s
+    scrape_interval: 60s
+```
+
+## Grafana Alloy Config
+
+```alloy
+prometheus.scrape "arris_modem" {
+  targets = [{
+    __address__ = "arris-exporter:9120",
+  }]
+  scrape_interval = "60s"
+  forward_to     = [prometheus.remote_write.default.receiver]
+}
 ```
 
 ## Useful Alerts
