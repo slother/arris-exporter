@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from prometheus_client import (
     CollectorRegistry,
     start_http_server,
@@ -60,10 +62,22 @@ class ArrisCollector:
     """Custom Prometheus collector for Arris Touchstone cable modems."""
 
     def __init__(self, base_url: str, timeout: int = 10,
+                 retries: int = 2,
                  session: requests.Session | None = None):
         self.base_url = base_url
         self.timeout = timeout
-        self.session = session or requests.Session()
+        if session is not None:
+            self.session = session
+        else:
+            self.session = requests.Session()
+            retry = Retry(
+                total=retries,
+                backoff_factor=0.5,
+                status_forcelist=[500, 502, 503, 504],
+            )
+            adapter = HTTPAdapter(max_retries=retry)
+            self.session.mount("http://", adapter)
+            self.session.mount("https://", adapter)
 
     def _fetch_page(self, url: str) -> BeautifulSoup | None:
         """Fetch a modem page and return parsed soup, or None on failure."""
@@ -490,6 +504,10 @@ def main():
     parser = argparse.ArgumentParser(description="Arris Touchstone modem Prometheus exporter")
     parser.add_argument("--port", type=int, default=9120, help="Exporter listen port (default: 9120)")
     parser.add_argument("--base-url", default=MODEM_BASE, help="Modem CGI base URL")
+    parser.add_argument("--timeout", type=int, default=10,
+                        help="HTTP request timeout in seconds (default: 10)")
+    parser.add_argument("--retries", type=int, default=2,
+                        help="HTTP retry attempts per request (default: 2)")
     parser.add_argument("--log-level", default="info",
                         choices=["debug", "info", "warning", "error"],
                         help="Log level (default: info)")
@@ -506,9 +524,11 @@ def main():
     )
 
     registry = CollectorRegistry()
-    registry.register(ArrisCollector(args.base_url))
+    registry.register(ArrisCollector(args.base_url, timeout=args.timeout,
+                                     retries=args.retries))
 
-    log.info("Starting Arris exporter v%s on :%d, target %s", __version__, args.port, args.base_url)
+    log.info("Starting Arris exporter v%s on :%d, target %s (timeout=%ds, retries=%d)",
+             __version__, args.port, args.base_url, args.timeout, args.retries)
     start_http_server(args.port, registry=registry)
     log.info("Listening on :%d/metrics", args.port)
 
