@@ -245,6 +245,7 @@ class ArrisCollector:
 
         status_tables = soup.find_all("table", attrs={"cellpadding": "0", "cellspacing": "0"})
         cm_state_val = {"operational": 0, "offline": 0, "other": 0}
+        uptime_seen = False
         for tbl in status_tables:
             for row in tbl.find_all("tr"):
                 cells = row.find_all("td")
@@ -253,8 +254,9 @@ class ArrisCollector:
                 label = cells[0].get_text(strip=True).lower()
                 value = cells[1].get_text(strip=True)
 
-                if "uptime" in label:
+                if "uptime" in label and not uptime_seen:
                     uptime_metric.add_metric([], parse_uptime(value))
+                    uptime_seen = True
                 elif "computers detected" in label:
                     for cpe_match in re.finditer(r"(static|dynamic)CPE\((\d+)\)", value):
                         computers.add_metric([cpe_match.group(1)], int(cpe_match.group(2)))
@@ -332,14 +334,17 @@ class ArrisCollector:
                     cells = row.find_all("td")
                     if len(cells) >= 2:
                         tod.add_metric([], 1 if cells[1].get_text(strip=True).lower() == "retrieved" else 0)
+                        break
 
             if len(cm_tables) >= 3:
                 for row in cm_tables[2].find_all("tr"):
                     cells = row.find_all("td")
                     if len(cells) >= 2:
                         bpi.add_metric([], 1 if "authorized" in cells[1].get_text(strip=True).lower() else 0)
+                        break
 
             if len(cm_tables) >= 4:
+                dhcp_v4_val = dhcp_v6_val = None
                 for row in cm_tables[3].find_all("tr"):
                     cells = row.find_all("td")
                     if len(cells) < 2:
@@ -349,10 +354,14 @@ class ArrisCollector:
                         val = parse_int(cells[1].get_text(strip=True))
                     except ValueError:
                         continue
-                    if "ipv4" in lbl:
-                        dhcp_v4.add_metric([], val)
-                    elif "ipv6" in lbl:
-                        dhcp_v6.add_metric([], val)
+                    if "ipv4" in lbl and dhcp_v4_val is None:
+                        dhcp_v4_val = val
+                    elif "ipv6" in lbl and dhcp_v6_val is None:
+                        dhcp_v6_val = val
+                if dhcp_v4_val is not None:
+                    dhcp_v4.add_metric([], dhcp_v4_val)
+                if dhcp_v6_val is not None:
+                    dhcp_v6.add_metric([], dhcp_v6_val)
 
         return [docsis_step, tod, bpi, dhcp_v4, dhcp_v6]
 
