@@ -56,6 +56,25 @@ STATUS_CGI_WITH_INACTIVE_HTML = """\
 </body></html>
 """
 
+# Same channel row rendered twice in a table (as nested tables cause on real
+# modems). The parser must emit one series per channel, not one per row.
+STATUS_CGI_DUP_ROWS_HTML = """\
+<html><body>
+<table border="2">
+<tr><td>Downstream 1</td><td>14</td><td>722.00 MHz</td><td>5.00 dBmV</td><td>38.98 dB</td><td>256QAM</td><td>3932404</td><td>8</td><td>0</td></tr>
+<tr><td>Downstream 1</td><td>14</td><td>722.00 MHz</td><td>5.00 dBmV</td><td>38.98 dB</td><td>256QAM</td><td>3932404</td><td>8</td><td>0</td></tr>
+</table>
+<table border="2">
+<tr><td>Upstream 1</td><td>1</td><td>81.80 MHz</td><td>47.25 dBmV</td><td>DOCSIS2.0 (ATDMA)</td><td>5120 kSym/s</td><td>64QAM</td></tr>
+<tr><td>Upstream 1</td><td>1</td><td>81.80 MHz</td><td>47.25 dBmV</td><td>DOCSIS2.0 (ATDMA)</td><td>5120 kSym/s</td><td>64QAM</td></tr>
+</table>
+<table border="2"></table>
+<table cellpadding="0" cellspacing="0">
+<tr><td width="160">CM Status:</td><td>OPERATIONAL</td></tr>
+</table>
+</body></html>
+"""
+
 STATUS_CGI_OFFLINE_HTML = """\
 <html><body>
 <table border="2"></table>
@@ -645,6 +664,20 @@ class TestDedupSamples:
         out = list(_dedup_samples([g]))
         assert len(out[0].samples) == 2
         assert [s.value for s in out[0].samples] == [10, 30]
+
+    def test_repeated_channel_row_emitted_once(self):
+        """Parser emits one series per channel even when a row appears twice, so the
+        global dedup net never fires. Checks _collect() (pre-dedup) to target the guard."""
+        mock_session = MagicMock()
+        mock_session.get.side_effect = _route(status_html=STATUS_CGI_DUP_ROWS_HTML)
+        collector = ArrisCollector("http://test/cgi-bin", session=mock_session)
+        counts = {}
+        for fam in collector._collect():
+            for s in fam.samples:
+                key = (s.name, tuple(sorted(s.labels.items())))
+                counts[key] = counts.get(key, 0) + 1
+        dups = {k: c for k, c in counts.items() if c > 1}
+        assert not dups, f"parser double-emitted before dedup: {dups}"
 
 
 # ===========================================================================
