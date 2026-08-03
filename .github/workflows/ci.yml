@@ -64,10 +64,10 @@ jobs:
   edge-publish:
     if: github.event_name == 'push'
     needs: [test]
+    # Must grant the union of container-publish's job permissions; a narrower set
+    # (e.g. contents: read) fails the run at startup, not just the gated step.
     permissions:
-      # Edge builds create no GitHub release; the reusable's only contents:write
-      # step (release-upload) is gated on a non-empty release-tag.
-      contents: read
+      contents: write
       packages: write
       id-token: write
       attestations: write
