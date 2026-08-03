@@ -26,7 +26,7 @@ from prometheus_client import (
 )
 from prometheus_client.core import GaugeMetricFamily
 
-__version__ = "1.2.0"  # x-release-please-version
+__version__ = "1.2.1"  # x-release-please-version
 
 MODEM_BASE = "http://192.168.100.1/cgi-bin"
 MAX_RESPONSE_BYTES = 1_000_000  # 1 MB
