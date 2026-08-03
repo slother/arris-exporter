@@ -156,6 +156,7 @@ class ArrisCollector:
         )
 
         if len(tables) >= 1:
+            seen = set()
             for row in tables[0].find_all("tr"):
                 cells = row.find_all("td")
                 if len(cells) < 9:
@@ -164,6 +165,11 @@ class ArrisCollector:
                 if text[0].startswith("Downstream"):
                     channel = text[0]
                     dcid = text[1]
+                    # A channel maps to one series per scrape. Nested tables make
+                    # find_all surface the same row twice; keep the first.
+                    if dcid in seen:
+                        continue
+                    seen.add(dcid)
                     freq_mhz = str(parse_float(text[2]))
                     try:
                         freq_hz = parse_float(text[2]) * 1e6
@@ -214,6 +220,7 @@ class ArrisCollector:
         )
 
         if len(tables) >= 2:
+            seen = set()
             for row in tables[1].find_all("tr"):
                 cells = row.find_all("td")
                 if len(cells) < 7:
@@ -222,6 +229,11 @@ class ArrisCollector:
                 if text[0].startswith("Upstream"):
                     channel = text[0]
                     ucid = text[1]
+                    # A channel maps to one series per scrape. Nested tables make
+                    # find_all surface the same row twice; keep the first.
+                    if ucid in seen:
+                        continue
+                    seen.add(ucid)
                     freq_mhz = str(parse_float(text[2]))
                     try:
                         freq_hz = parse_float(text[2]) * 1e6
