@@ -1,6 +1,21 @@
 # CHANGELOG
 
 
+## [1.2.0](https://github.com/slother/arris-exporter/compare/v1.1.0...v1.2.0) (2026-08-03)
+
+
+### Features
+
+* add Grafana dashboard and screenshots ([#10](https://github.com/slother/arris-exporter/issues/10)) ([0a436bd](https://github.com/slother/arris-exporter/commit/0a436bd479e995f393e07a1ece7cf665f99596ce))
+* add semantic versioning with python-semantic-release ([c6bb230](https://github.com/slother/arris-exporter/commit/c6bb23030168abae7f3a6651e58a8f3511e60834))
+* configurable log level, release-please, shared CI workflows ([#22](https://github.com/slother/arris-exporter/issues/22)) ([e70d035](https://github.com/slother/arris-exporter/commit/e70d03519a878a7d56a93e721252375293520652))
+
+
+### Bug Fixes
+
+* add HTTP retry with backoff to prevent scrape gaps ([#12](https://github.com/slother/arris-exporter/issues/12)) ([cef4be0](https://github.com/slother/arris-exporter/commit/cef4be0fa8078ad2e86a3e0c9c3e9ea154b7ade1))
+* prevent duplicate samples for no-label metrics ([#17](https://github.com/slother/arris-exporter/issues/17)) ([4a7d60c](https://github.com/slother/arris-exporter/commit/4a7d60c77c38d57bf3e504b9203b59bcc776dee1))
+
 ## [1.1.0](https://github.com/slother/arris-exporter/compare/v1.0.0...v1.1.0) (2026-08-03)
 
 
