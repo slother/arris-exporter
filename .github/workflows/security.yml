@@ -1,0 +1,35 @@
+name: Security and workflow lint
+
+# Weekly re-scan (catches newly disclosed CVEs and drifted actions) plus a
+# manual trigger. actionlint/zizmor also guard workflow YAML changes; docker
+# hygiene mirrors the push-time scan in ci.yml so the Security tab stays current.
+on:
+  workflow_call:
+  schedule:
+    - cron: "42 5 * * 2"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  actionlint:
+    permissions:
+      contents: read
+    uses: slother/.github/.github/workflows/actionlint.yml@main
+
+  zizmor:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: slother/.github/.github/workflows/zizmor.yml@main
+
+  # Fork PRs can't get security-events: write; skip them so the SARIF upload
+  # doesn't 403. Harmless today (no pull_request trigger) but keeps the guard
+  # correct if this workflow is later wired into CI.
+  docker-security:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      security-events: write
+    uses: slother/.github/.github/workflows/docker-security.yml@main
