@@ -20,7 +20,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -30,13 +30,14 @@ jobs:
 
       - name: Semantic Release
         id: release
-        uses: python-semantic-release/python-semantic-release@v9
+        uses: python-semantic-release/python-semantic-release@v10
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          commit: "false"
 
       - name: Publish GitHub Release
         if: steps.release.outputs.released == 'true'
-        uses: python-semantic-release/publish-action@v9
+        uses: python-semantic-release/publish-action@v10
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ steps.release.outputs.tag }}
