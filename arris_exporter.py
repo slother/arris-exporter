@@ -26,12 +26,34 @@ from prometheus_client import (
 )
 from prometheus_client.core import GaugeMetricFamily
 
-__version__ = "0.1.0"
+__version__ = "0.1.0"  # x-release-please-version
 
 MODEM_BASE = "http://192.168.100.1/cgi-bin"
 MAX_RESPONSE_BYTES = 1_000_000  # 1 MB
 
 log = logging.getLogger("arris_exporter")
+
+
+def _dedup_samples(families):
+    """Drop repeat (name, labels) samples within one scrape.
+
+    Prometheus rejects a scrape that carries the same series twice
+    ("same timestamp, different value"). Enforcing uniqueness here, at the
+    single point all samples pass through, keeps any parser from reintroducing
+    the duplicate. First occurrence wins.
+    """
+    seen: set[tuple] = set()
+    for family in families:
+        kept = []
+        for s in family.samples:
+            key = (s.name, tuple(sorted(s.labels.items())))
+            if key in seen:
+                log.warning("Dropping duplicate series %s%s", s.name, s.labels)
+                continue
+            seen.add(key)
+            kept.append(s)
+        family.samples = kept
+        yield family
 
 
 def parse_float(text: str) -> float:
@@ -443,7 +465,10 @@ class ArrisCollector:
         return [modem_info]
 
     def collect(self):
-        log.info("Scrape started")
+        yield from _dedup_samples(self._collect())
+
+    def _collect(self):
+        log.debug("Scrape started")
         start = time.monotonic()
         success = 1
         ds_total = ds_locked = us_total = us_locked = 0
@@ -500,8 +525,8 @@ class ArrisCollector:
         scrape_dur.add_metric([], elapsed)
 
         if success:
-            log.info("Scrape completed in %.2fs — DS: %d/%d locked, US: %d/%d locked",
-                     elapsed, ds_locked, ds_total, us_locked, us_total)
+            log.debug("Scrape completed in %.2fs - DS: %d/%d locked, US: %d/%d locked",
+                      elapsed, ds_locked, ds_total, us_locked, us_total)
         else:
             log.warning("Scrape failed after %.2fs", elapsed)
 

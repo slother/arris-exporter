@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
-from arris_exporter import ArrisCollector, __version__, parse_float, parse_int, parse_uptime
+from arris_exporter import ArrisCollector, _dedup_samples, __version__, parse_float, parse_int, parse_uptime
 
 
 # ---------------------------------------------------------------------------
@@ -622,6 +622,29 @@ class TestScrapeHealth:
             raise requests.ConnectionError("refused")
         m = _collect(side_effect=fail)
         assert _val(m, "arris_scrape_success") == 0
+
+
+# ===========================================================================
+# Duplicate series guard (Alloy: "same timestamp but different value")
+# ===========================================================================
+
+class TestDedupSamples:
+    def test_no_duplicate_series_in_scrape(self):
+        """Every (name, labels) pair a scrape emits must be unique."""
+        m = _collect()
+        for name, entries in m.items():
+            label_sets = [tuple(sorted(lbl.items())) for lbl, _ in entries]
+            assert len(label_sets) == len(set(label_sets)), f"duplicate series in {name}"
+
+    def test_dedup_drops_repeats(self):
+        from prometheus_client.core import GaugeMetricFamily
+        g = GaugeMetricFamily("x", "h", labels=["a"])
+        g.add_metric(["1"], 10)
+        g.add_metric(["1"], 20)  # duplicate label set
+        g.add_metric(["2"], 30)
+        out = list(_dedup_samples([g]))
+        assert len(out[0].samples) == 2
+        assert [s.value for s in out[0].samples] == [10, 30]
 
 
 # ===========================================================================
