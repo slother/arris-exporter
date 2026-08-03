@@ -1,6 +1,13 @@
 # CHANGELOG
 
 
+## [1.1.0](https://github.com/slother/arris-exporter/compare/v1.0.0...v1.1.0) (2026-08-03)
+
+
+### Features
+
+* configurable log level, release-please, shared CI workflows ([#22](https://github.com/slother/arris-exporter/issues/22)) ([e70d035](https://github.com/slother/arris-exporter/commit/e70d03519a878a7d56a93e721252375293520652))
+
 ## v0.1.0 (2026-04-01)
 
 ### Continuous Integration
