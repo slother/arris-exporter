@@ -1,6 +1,13 @@
 # CHANGELOG
 
 
+## [1.2.1](https://github.com/slother/arris-exporter/compare/v1.2.0...v1.2.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* emit one series per channel to stop duplicate-series warnings ([#25](https://github.com/slother/arris-exporter/issues/25)) ([5c3acb0](https://github.com/slother/arris-exporter/commit/5c3acb0445a2af18ac1bf2005851449fd7e5aece))
+
 ## [1.2.0](https://github.com/slother/arris-exporter/compare/v1.1.0...v1.2.0) (2026-08-03)
 
 
